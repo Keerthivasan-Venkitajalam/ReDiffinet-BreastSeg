@@ -1,0 +1,32 @@
+ReDiffinet-BreastSeg/
+├── config/
+│   └── config.py
+├── data/
+│   ├── dataset.py
+│   └── transforms.py
+├── models/
+│   ├── unet.py 
+│   ├── diffusion.py
+│   └── rediffinet.py
+├── utils/
+│   ├── metrics.py
+│   └── visualization.py
+├── train.py
+└── inference.py
+
+# Data directory (will need to be created)
+├── dataset/
+│   ├── train/
+│   │   ├── images/
+│   │   └── masks/
+│   ├── val/
+│   │   ├── images/
+│   │   └── masks/
+│   └── test/
+│       ├── images/
+│       └── masks/
+
+# These directories will be created automatically during execution
+├── weights/
+├── visualizations/
+└── results/
