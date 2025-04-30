@@ -1,3 +1,87 @@
+"""
+Implementation of Diffusion Models for ReDiffiNet breast segmentation.
+
+### Mathematical Summary of DDPM (Denoising Diffusion Probabilistic Models) ###
+
+#### Key Concepts:
+
+1. Forward Process (Diffusion):
+   - The forward process progressively adds Gaussian noise to an image over a series of time steps t, 
+     transforming it into pure random noise by the final step.
+   - The transition from x_{t-1} to x_t is governed by a Markov process:
+     
+     q(x_t | x_{t-1}) = N(x_t; √(α_t) x_{t-1}, β_t I)
+     
+     where:
+     - α_t controls how much of the original structure remains
+     - β_t controls the variance of the added noise
+
+   - After T steps, the resulting distribution q(x_T) approximates a standard normal distribution:
+     
+     q(x_T) ≈ N(0, I)
+
+2. Reverse Process (Denoising):
+   - The reverse process learns to iteratively denoise x_t to recover the original image x_0.
+   - The reverse transition is modeled as:
+     
+     p_θ(x_{t-1} | x_t) = N(x_{t-1}; μ_θ(x_t, t), Σ_θ(x_t, t))
+     
+     where:
+     - μ_θ is the predicted mean of the denoising distribution
+     - Σ_θ is typically fixed to simplify training
+
+3. Reparameterization:
+   - To efficiently compute x_t at any time step t, the forward process can be reformulated as:
+     
+     x_t = √(ᾱ_t) x_0 + √(1 - ᾱ_t) ε
+     
+     where:
+     - ᾱ_t = ∏_{s=1}^t α_s is the cumulative product of α_t
+     - ε ~ N(0, I) is standard Gaussian noise
+
+#### Training Objective:
+- The training objective is to match the predicted noise ε_θ(x_t, t) with the true noise ε
+  added during the forward process.
+- The simplified loss function becomes:
+  
+  L = E_{t,x_0,ε} [||ε - ε_θ(x_t, t)||²]
+  
+  where:
+  - t is sampled uniformly across all time steps
+  - x_t is generated using the forward process
+
+#### Practical Considerations:
+1. Noise Schedule:
+   - Variance β_t is scheduled to increase linearly over time.
+   - Early steps add small noise (preserving structure), while later steps add larger noise.
+
+2. One-Step Transition:
+   - Instead of iteratively applying the forward process for t steps,
+     x_t can be computed directly using the reparameterization formula.
+
+3. Reverse Sampling:
+   - To generate data, start with random Gaussian noise x_T ~ N(0, I) and 
+     iteratively apply the learned reverse transitions p_θ(x_{t-1} | x_t).
+
+#### Connections to Variational Autoencoders (VAEs):
+- Like VAEs, DDPMs optimize a variational lower bound on the data likelihood:
+  
+  log p(x_0) ≥ E_q[log p_θ(x_{0:T}) - log q(x_{1:T} | x_0)]
+  
+- The difference lies in the Markov structure and the discretized diffusion process,
+  which models transitions step-by-step instead of all at once.
+
+#### Summary of Training and Sampling:
+1. Training:
+   - Sample x_0 from the dataset and t uniformly from 1,...,T
+   - Generate x_t using the forward process
+   - Train the model to predict the noise ε using the loss: L = ||ε - ε_θ(x_t, t)||²
+
+2. Sampling (Generation):
+   - Start with x_T ~ N(0, I)
+   - Iteratively sample x_{t-1} from p_θ(x_{t-1} | x_t) until x_0 is obtained
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -151,6 +235,14 @@ class DiffusionUp(nn.Module):
         return self.conv(x, t)
 
 class GaussianDiffusion:
+    """
+    Gaussian Diffusion Process Implementation
+    
+    Key Equations:
+    1. Forward Process: q(x_t | x_{t-1}) = N(x_t; √(α_t) x_{t-1}, β_t I)
+    2. Direct Sampling: x_t = √(ᾱ_t) x_0 + √(1 - ᾱ_t) ε where ε ~ N(0, I)
+    3. Training Loss: L = ||ε - ε_θ(x_t, t)||²
+    """
     def __init__(self, timesteps=1000, beta_schedule='linear', beta_start=0.0001, beta_end=0.02):
         self.timesteps = timesteps
         
@@ -166,13 +258,13 @@ class GaussianDiffusion:
             self.betas = torch.clip(betas, 0, 0.999)
         
         # Pre-calculate different terms for closed form
-        self.alphas = 1. - self.betas
-        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+        self.alphas = 1. - self.betas                                  # α_t
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)        # ᾱ_t = ∏_{s=1}^t α_s
         self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
         
         # Calculations for diffusion q(x_t | x_{t-1}) and others
-        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)           # √(ᾱ_t)
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)  # √(1 - ᾱ_t)
         self.log_one_minus_alphas_cumprod = torch.log(1. - self.alphas_cumprod)
         self.sqrt_recip_alphas_cumprod = torch.sqrt(1. / self.alphas_cumprod)
         self.sqrt_recipm1_alphas_cumprod = torch.sqrt(1. / self.alphas_cumprod - 1)
@@ -184,7 +276,10 @@ class GaussianDiffusion:
         
     def q_sample(self, x_0, t, noise=None):
         """
-        Forward diffusion process
+        Forward diffusion process: Sample from q(x_t | x_0)
+        
+        This implements the direct sampling formula:
+        x_t = √(ᾱ_t) x_0 + √(1 - ᾱ_t) ε where ε ~ N(0, I)
         """
         if noise is None:
             noise = torch.randn_like(x_0)
@@ -197,6 +292,8 @@ class GaussianDiffusion:
     def p_losses(self, denoise_model, x_0, t, conditioning=None, noise=None):
         """
         Training loss calculation
+        
+        Implements the simplified loss: L = ||ε - ε_θ(x_t, t)||²
         """
         if noise is None:
             noise = torch.randn_like(x_0)
