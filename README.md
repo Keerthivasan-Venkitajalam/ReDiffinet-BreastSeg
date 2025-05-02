@@ -1,6 +1,8 @@
 # ReDiffinet-BreastSeg
 ## ReDiffiNet for Breast Tumor Segmentation
 
+NOTEBOOK LINK: https://www.kaggle.com/code/keerthivasansv/multi-modal-medical-imaging
+
 ReDiffiNet is a modular framework that combines a baseline U-Net and Denoising Diffusion Probabilistic Models (DDPM) to refine breast tumor segmentation results. This project is designed to address challenges in segmenting breast tumor regions, such as masses, calcifications, and architectural distortions, with a focus on improving boundary accuracy.
 
 ---
